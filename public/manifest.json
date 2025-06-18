@@ -1,0 +1,9 @@
+{
+    "name": "Gramket",
+    "short_name": "Gramket",
+    "description": "Торговая площадка для Telegram",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#212121",
+    "theme_color": "#212121"
+}
