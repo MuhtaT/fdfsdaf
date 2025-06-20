@@ -113,7 +113,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900 flex flex-col">
+    <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900 flex flex-col">
       <Header
         showBackButton
         title={decodeURIComponent(seller)}

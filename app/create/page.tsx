@@ -141,7 +141,7 @@ export default function CreateAdPage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900">
+    <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900">
       <Header showBackButton title="Подать объявление" theme={safeTheme} />
 
       <main className="pt-16 pb-24">
