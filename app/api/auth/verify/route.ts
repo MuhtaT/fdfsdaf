@@ -1,42 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getUserById, updateUserLastActive } from '@/lib/services/user-service'
+import { validateSession } from '@/lib/services/session-service'
+import { updateUserLastActive } from '@/lib/services/user-service'
 
 export async function POST(request: NextRequest) {
   try {
     const { sessionToken, userId } = await request.json()
 
-    if (!sessionToken || !userId) {
+    if (!sessionToken) {
       return NextResponse.json(
-        { error: true, message: 'Отсутствуют данные сессии' },
+        { error: true, message: 'Отсутствует токен сессии' },
         { status: 400 }
       )
     }
 
-    // В реальном приложении здесь нужно проверить токен сессии в базе данных/кэше
-    // Для упрощения примера просто проверяем, что пользователь существует
-    const user = await getUserById(userId)
-    if (!user) {
+    // Валидация сессии через базу данных
+    const sessionWithUser = await validateSession(sessionToken)
+    
+    if (!sessionWithUser) {
       return NextResponse.json(
-        { error: true, message: 'Пользователь не найден' },
-        { status: 404 }
+        { error: true, message: 'Сессия недействительна или истекла' },
+        { status: 401 }
       )
     }
 
-    // Обновляем время последней активности
-    await updateUserLastActive(user.id)
+    // Дополнительная проверка userId если передан
+    if (userId && sessionWithUser.user.id !== userId) {
+      return NextResponse.json(
+        { error: true, message: 'Несоответствие пользователя' },
+        { status: 403 }
+      )
+    }
+
+    // Обновляем время последней активности пользователя
+    await updateUserLastActive(sessionWithUser.user.id)
 
     return NextResponse.json({
       success: true,
       user: {
-        id: user.id,
-        telegramId: user.telegramId,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        username: user.username,
-        photoUrl: user.photoUrl,
-        isPremium: user.isPremium,
-        createdAt: user.createdAt,
+        id: sessionWithUser.user.id,
+        telegramId: sessionWithUser.user.telegramId,
+        firstName: sessionWithUser.user.firstName,
+        lastName: sessionWithUser.user.lastName,
+        username: sessionWithUser.user.username,
+        photoUrl: sessionWithUser.user.photoUrl,
+        isPremium: sessionWithUser.user.isPremium,
+        createdAt: sessionWithUser.user.createdAt,
         lastActiveAt: new Date()
+      },
+      session: {
+        id: sessionWithUser.id,
+        expiresAt: sessionWithUser.expiresAt,
+        lastActiveAt: sessionWithUser.lastActiveAt
       }
     })
 

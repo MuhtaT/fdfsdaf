@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import crypto from 'crypto'
-import { cloudStorage, retrieveLaunchParams } from '@telegram-apps/sdk-react'
+import { cloudStorage, useLaunchParams, useRawInitData } from '@telegram-apps/sdk-react'
 import { encryptData, decryptData, generateSalt, validatePasswordStrength } from '@/lib/utils/encryption'
 import type { User } from '../generated/prisma'
 
@@ -35,6 +35,10 @@ const SESSION_DURATION = 24 * 60 * 60 * 1000 // 24 часа
 const MAX_PASSWORD_ATTEMPTS = 3
 
 export function useAuthWithPassword() {
+  // Получаем данные Telegram на верхнем уровне
+  const launchParams = useLaunchParams()
+  const initDataRaw = useRawInitData()
+  
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
     isLoading: true,
@@ -46,6 +50,7 @@ export function useAuthWithPassword() {
   })
 
   const [showWelcome, setShowWelcome] = useState(false)
+  const [currentSessionToken, setCurrentSessionToken] = useState<string | null>(null)
 
   // Проверка наличия сохраненной сессии
   const checkStoredSession = useCallback(async (): Promise<StoredSessionData | null> => {
@@ -161,8 +166,38 @@ export function useAuthWithPassword() {
   // Аутентификация через Telegram
   const authenticateWithTelegram = useCallback(async (): Promise<User | null> => {
     try {
-      const launchParams = retrieveLaunchParams()
-      if (!launchParams.initData || !launchParams.initDataRaw) {
+      // В development режиме можем работать без данных Telegram
+      if (process.env.NODE_ENV === 'development' && (!launchParams.tgWebAppData || !initDataRaw)) {
+        console.warn('⚠️ Development режим: создаем мок данные для аутентификации')
+        
+        // Используем мок данные для разработки
+        const response = await fetch('/api/auth/telegram', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            initData: 'user=%7B%22id%22%3A12345%2C%22first_name%22%3A%22Dev%22%2C%22last_name%22%3A%22User%22%2C%22username%22%3A%22devuser%22%2C%22language_code%22%3A%22ru%22%7D&query_id=AAHdF6IQAAAAAN0XohDhrOrc&auth_date=1703840000&hash=mock_hash',
+            startParam: 'development'
+          })
+        })
+
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.message || 'Ошибка аутентификации')
+        }
+
+        const { user, sessionToken } = await response.json()
+        
+        // Сохраняем токен сессии для дальнейшего использования
+        if (sessionToken) {
+          setCurrentSessionToken(sessionToken)
+        }
+        
+        return user
+      }
+
+      if (!launchParams.tgWebAppData || !initDataRaw) {
         throw new Error('Нет данных инициализации Telegram')
       }
 
@@ -172,8 +207,8 @@ export function useAuthWithPassword() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          initData: launchParams.initDataRaw,
-          startParam: launchParams.startParam
+          initData: initDataRaw,
+          startParam: launchParams.tgWebAppStartParam
         })
       })
 
@@ -182,13 +217,19 @@ export function useAuthWithPassword() {
         throw new Error(error.message || 'Ошибка аутентификации')
       }
 
-      const { user } = await response.json()
+      const { user, sessionToken } = await response.json()
+      
+      // Сохраняем токен сессии для дальнейшего использования
+      if (sessionToken) {
+        setCurrentSessionToken(sessionToken)
+      }
+      
       return user
     } catch (error) {
       console.error('Ошибка аутентификации с Telegram:', error)
       throw error
     }
-  }, [])
+  }, [launchParams, initDataRaw])
 
   // Установка пароля (первый вход)
   const setupPassword = useCallback(async (password: string) => {
@@ -207,11 +248,11 @@ export function useAuthWithPassword() {
         throw new Error('Не удалось получить данные пользователя')
       }
 
-      // Создание зашифрованной сессии
+      // Создание зашифрованной сессии с реальным токеном сессии
       const sessionData: EncryptedSessionData = {
         userId: user.id,
         telegramId: user.telegramId,
-        sessionToken: crypto.randomUUID(),
+        sessionToken: currentSessionToken || crypto.randomUUID(),
         expiresAt: Date.now() + SESSION_DURATION,
         userHash: crypto.createHash('sha256').update(JSON.stringify({
           id: user.id,
@@ -244,7 +285,7 @@ export function useAuthWithPassword() {
         error: error instanceof Error ? error.message : 'Неизвестная ошибка'
       }))
     }
-  }, [authenticateWithTelegram, saveEncryptedSession, savePasswordAttempts])
+  }, [authenticateWithTelegram, saveEncryptedSession, savePasswordAttempts, currentSessionToken])
 
   // Вход с паролем
   const loginWithPassword = useCallback(async (password: string) => {
@@ -287,22 +328,7 @@ export function useAuthWithPassword() {
         return
       }
 
-      // Проверяем актуальность сессии
-      if (Date.now() > sessionData.expiresAt) {
-        await clearSession()
-        setAuthState({
-          user: null,
-          isLoading: false,
-          isAuthenticated: false,
-          error: null,
-          needsPasswordSetup: true,
-          needsPasswordInput: false,
-          passwordAttempts: 0
-        })
-        return
-      }
-
-      // Получаем актуальные данные пользователя
+      // Проверяем актуальность сессии через новый API
       const response = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: {
@@ -346,17 +372,40 @@ export function useAuthWithPassword() {
 
   // Выход из системы
   const logout = useCallback(async () => {
-    await clearSession()
-    setAuthState({
-      user: null,
-      isLoading: false,
-      isAuthenticated: false,
-      error: null,
-      needsPasswordSetup: true,
-      needsPasswordInput: false,
-      passwordAttempts: 0
-    })
-  }, [clearSession])
+    try {
+      // Если есть токен сессии, деактивируем его на сервере
+      const storedSession = await checkStoredSession()
+      if (storedSession) {
+        const sessionData = await decryptSession(storedSession, 'dummy') // Пытаемся получить токен
+        if (sessionData?.sessionToken) {
+          await fetch('/api/auth/logout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              sessionToken: sessionData.sessionToken
+            })
+          }).catch(error => {
+            console.warn('Не удалось деактивировать сессию на сервере:', error)
+          })
+        }
+      }
+    } catch (error) {
+      console.warn('Ошибка при выходе из системы:', error)
+    } finally {
+      await clearSession()
+      setAuthState({
+        user: null,
+        isLoading: false,
+        isAuthenticated: false,
+        error: null,
+        needsPasswordSetup: true,
+        needsPasswordInput: false,
+        passwordAttempts: 0
+      })
+    }
+  }, [clearSession, checkStoredSession, decryptSession])
 
   // Инициализация при загрузке
   useEffect(() => {

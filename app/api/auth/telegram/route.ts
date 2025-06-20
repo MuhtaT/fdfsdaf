@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import crypto from 'crypto'
-import { validateTelegramInitData } from '@/lib/telegram-auth'
-import { createOrUpdateUser } from '@/lib/services/user-service'
+import { validateTelegramInitData, type TelegramUser } from '@/lib/telegram-auth'
+import { createOrUpdateUser, updateUserLastActive } from '@/lib/services/user-service'
+import { createSession } from '@/lib/services/session-service'
+import { headers } from 'next/headers'
+
+const SESSION_DURATION = 24 * 60 * 60 * 1000 // 24 часа
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,33 +17,76 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Валидируем данные Telegram
-    const botToken = process.env.TELEGRAM_BOT_TOKEN
-    if (!botToken) {
-      console.error('TELEGRAM_BOT_TOKEN не установлен')
-      return NextResponse.json(
-        { error: true, message: 'Ошибка конфигурации сервера' },
-        { status: 500 }
-      )
+    // Валидация данных Telegram
+    let isValid = false
+    let userData: TelegramUser | null = null
+    
+    try {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN
+      if (!botToken) {
+        throw new Error('TELEGRAM_BOT_TOKEN не установлен')
+      }
+      
+      const validatedData = validateTelegramInitData(initData, botToken)
+      if (validatedData && validatedData.user) {
+        isValid = true
+        userData = validatedData.user
+      }
+    } catch (error) {
+      // В development режиме можем пропустить валидацию
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('⚠️ Development режим: пропускаем валидацию Telegram')
+        
+        // Парсим мок данные для разработки
+        try {
+          const params = new URLSearchParams(initData)
+          const userParam = params.get('user')
+          if (userParam) {
+            userData = JSON.parse(decodeURIComponent(userParam))
+            isValid = true
+          }
+        } catch (parseError) {
+          // Если не удалось распарсить, используем дефолтные данные
+          userData = {
+            id: 12345,
+            first_name: 'Dev',
+            last_name: 'User',
+            username: 'devuser',
+            language_code: 'ru'
+          }
+          isValid = true
+        }
+      }
     }
 
-    const validatedData = validateTelegramInitData(initData, botToken)
-    if (!validatedData || !validatedData.user) {
+    if (!isValid || !userData) {
       return NextResponse.json(
         { error: true, message: 'Недействительные данные Telegram' },
         { status: 401 }
       )
     }
 
-    // Создаем или обновляем пользователя в базе данных
-    const user = await createOrUpdateUser(validatedData.user)
+    // Создаем или обновляем пользователя
+    const user = await createOrUpdateUser(userData)
 
-    // Создаем токен сессии
-    const sessionToken = crypto.randomBytes(32).toString('hex')
-    const expiresAt = Date.now() + (24 * 60 * 60 * 1000) // 24 часа
+    // Получаем информацию о клиенте для сессии
+    const headersList = await headers()
+    const userAgent = headersList.get('user-agent') || undefined
+    const forwarded = headersList.get('x-forwarded-for')
+    const realIp = headersList.get('x-real-ip')
+    const ipAddress = forwarded?.split(',')[0] || realIp || undefined
 
-    // Здесь можно сохранить токен сессии в базе данных или кэше
-    // Для примера просто возвращаем его (в продакшене нужна более сложная система)
+    // Создаем новую сессию
+    const expiresAt = new Date(Date.now() + SESSION_DURATION)
+    const session = await createSession({
+      userId: user.id,
+      userAgent,
+      ipAddress,
+      expiresAt
+    })
+
+    // Обновляем время последней активности пользователя
+    await updateUserLastActive(user.id)
 
     return NextResponse.json({
       success: true,
@@ -53,10 +99,10 @@ export async function POST(request: NextRequest) {
         photoUrl: user.photoUrl,
         isPremium: user.isPremium,
         createdAt: user.createdAt,
-        lastActiveAt: user.lastActiveAt
+        lastActiveAt: new Date()
       },
-      sessionToken,
-      expiresAt
+      sessionToken: session.sessionToken,
+      expiresAt: session.expiresAt
     })
 
   } catch (error) {
