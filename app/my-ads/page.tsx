@@ -140,7 +140,7 @@ export default function MyAdsPage() {
 
   if (ads.length === 0) {
     return (
-      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900">
+      <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900">
         <Header title="Мои объявления" theme={safeTheme} />
 
         <main className="container mx-auto px-4 pt-16 pb-20">
@@ -166,7 +166,7 @@ export default function MyAdsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900">
+    <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900">
       <Header title="Мои объявления" theme={safeTheme} />
 
       <main className="container mx-auto px-4 pt-16 pb-24">

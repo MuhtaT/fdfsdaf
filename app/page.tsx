@@ -13,7 +13,7 @@ export default function HomePage() {
   const telegramThemeSafe = createSafeTelegramTheme(telegramTheme)
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900">
+    <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900">
       <Header title="Avito Clone" theme={telegramThemeSafe} />
 
       <main className="container mx-auto px-4 pt-16 pb-20">

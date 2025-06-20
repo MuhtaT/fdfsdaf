@@ -102,7 +102,7 @@ export default function MessagesPage() {
 
   if (chats.length === 0) {
     return (
-      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900">
+      <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900">
         <Header title="Сообщения" theme={safeTheme} />
 
         <main className="container mx-auto px-4 pt-16 pb-20">
@@ -121,7 +121,7 @@ export default function MessagesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900">
+    <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900">
       <Header title="Сообщения" theme={safeTheme} />
 
       <main className="container mx-auto px-4 pt-16 pb-20">
