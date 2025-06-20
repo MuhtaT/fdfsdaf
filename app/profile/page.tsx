@@ -7,47 +7,78 @@ import Image from "next/image"
 import Header from "@/components/navigation/Header"
 import { useThemeStore } from "@/stores/useThemeStore"
 import { createSafeTelegramTheme } from "@/types/telegram-theme"
-
-const mockUser = {
-  name: "Александр Петров",
-  avatar: "/placeholder.svg?height=80&width=80",
-  rating: 4.8,
-  reviewsCount: 127,
-  isVerified: true,
-  memberSince: "2020",
-  phone: "+7 (999) 123-45-67",
-  email: "alex@example.com",
-  location: "Москва",
-  stats: {
-    activeAds: 12,
-    soldItems: 89,
-    totalViews: 15420,
-  },
-}
+import { useAuthWithPassword } from "@/lib/hooks/useAuthWithPassword"
+import { useUserAvatar } from "@/lib/hooks/useUserAvatar"
+import { formatUserName, formatMemberSince } from "@/lib/utils/telegram-avatar"
+import LoadingScreen from "@/components/ui/loading-screen"
 
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<"ads" | "reviews" | "settings">("ads")
   const [showSettings, setShowSettings] = useState(false)
   const [editMode, setEditMode] = useState(false)
-  const [formData, setFormData] = useState({
-    name: mockUser.name,
-    phone: mockUser.phone,
-    email: mockUser.email,
-    location: mockUser.location,
-  })
   const { telegramTheme, isDark, toggleDarkMode } = useThemeStore()
   const safeTheme = createSafeTelegramTheme(telegramTheme)
   const router = useRouter()
+
+  // Получаем данные пользователя из системы авторизации
+  const { user, isAuthenticated, isLoading, logout } = useAuthWithPassword()
+
+  // Получаем аватарку пользователя
+  const { avatarUrl, type: avatarType, isLoading: avatarLoading } = useUserAvatar(
+    null, // sessionToken получим из localStorage или другого источника
+    user?.firstName || undefined,
+    user?.lastName || undefined,
+    user?.username || undefined,
+    user?.telegramId || undefined
+  )
+
+  const [formData, setFormData] = useState({
+    name: formatUserName(user?.firstName || undefined, user?.lastName || undefined, user?.username || undefined),
+    phone: user?.phone || '',
+    email: user?.email || '',
+    location: 'Не указано', // TODO: добавить поле location в модель User
+  })
+
+  // Показываем загрузку если данные еще загружаются
+  if (isLoading) {
+    return <LoadingScreen title="Загрузка профиля..." />
+  }
+
+  // Если пользователь не авторизован, перенаправляем на главную
+  if (!isAuthenticated || !user) {
+    router.push('/')
+    return null
+  }
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
   const handleSaveSettings = () => {
-    // Логика сохранения
+    // TODO: Логика сохранения настроек через API
     console.log("Saving settings:", formData)
     setEditMode(false)
   }
+
+  const handleLogout = async () => {
+    try {
+      await logout()
+      router.push('/')
+    } catch (error) {
+      console.error('Ошибка выхода:', error)
+    }
+  }
+
+  // Форматируем данные пользователя
+  const userName = formatUserName(
+    user.firstName || undefined, 
+    user.lastName || undefined, 
+    user.username || undefined
+  )
+  const memberSince = formatMemberSince(new Date(user.createdAt))
+  const userRating = user.rating || 0
+  const reviewsCount = user.reviewCount || 0
+  const userTelegramId = user.telegramId // Это уже string, не null
 
   return (
     <div className="h-screen max-h-screen overflow-y-auto bg-neutral-50 dark:bg-neutral-900">
@@ -71,13 +102,18 @@ export default function ProfilePage() {
           <div className="container mx-auto px-4 py-6">
             <div className="flex items-center space-x-4 mb-6">
               <div className="relative">
-                <Image
-                  src={mockUser.avatar || "/placeholder.svg"}
-                  alt={mockUser.name}
-                  width={80}
-                  height={80}
-                  className="rounded-full"
-                />
+                {avatarLoading ? (
+                  <div className="w-20 h-20 bg-neutral-200 dark:bg-neutral-700 rounded-full animate-pulse" />
+                ) : (
+                  <Image
+                    src={avatarUrl}
+                    alt={userName}
+                    width={80}
+                    height={80}
+                    className="rounded-full"
+                    unoptimized={avatarType === 'initials'} // Для SVG аватарок
+                  />
+                )}
                 <button className="absolute -bottom-1 -right-1 w-8 h-8 bg-avito-primary text-white rounded-full flex items-center justify-center hover:bg-avito-primary/90 transition-colors">
                   <Camera className="w-4 h-4" />
                 </button>
@@ -85,26 +121,37 @@ export default function ProfilePage() {
 
               <div className="flex-1">
                 <div className="flex items-center space-x-2 mb-1">
-                  <h1 className="font-display text-xl text-neutral-800 dark:text-neutral-200">{mockUser.name}</h1>
-                  {mockUser.isVerified && (
+                  <h1 className="font-display text-xl text-neutral-800 dark:text-neutral-200">{userName}</h1>
+                  {user.verified && (
                     <div className="w-6 h-6 bg-avito-success rounded-full flex items-center justify-center">
                       <Shield className="w-4 h-4 text-white" />
+                    </div>
+                  )}
+                  {user.isPremium && (
+                    <div className="px-2 py-1 bg-gradient-to-r from-yellow-400 to-orange-500 text-white text-xs font-bold rounded-full">
+                      PREMIUM
                     </div>
                   )}
                 </div>
 
                 <div className="flex items-center space-x-3 text-sm text-neutral-600 dark:text-neutral-400 mb-2">
-                  <div className="flex items-center">
-                    <Star className="w-4 h-4 text-yellow-400 fill-yellow-400 mr-1" />
-                    <span>{mockUser.rating}</span>
-                  </div>
+                  {userRating > 0 && (
+                    <>
+                      <div className="flex items-center">
+                        <Star className="w-4 h-4 text-yellow-400 fill-yellow-400 mr-1" />
+                        <span>{userRating.toFixed(1)}</span>
+                      </div>
+                      <span>•</span>
+                    </>
+                  )}
+                  <span>{reviewsCount} отзывов</span>
                   <span>•</span>
-                  <span>{mockUser.reviewsCount} отзывов</span>
-                  <span>•</span>
-                  <span>На сайте с {mockUser.memberSince}</span>
+                  <span>На сайте с {memberSince}</span>
                 </div>
 
-                <p className="text-neutral-600 dark:text-neutral-400 text-sm">{mockUser.location}</p>
+                {user.username && (
+                  <p className="text-neutral-600 dark:text-neutral-400 text-sm">@{user.username}</p>
+                )}
               </div>
 
               <button
@@ -118,17 +165,15 @@ export default function ProfilePage() {
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">
               <div className="text-center">
-                <div className="text-2xl font-bold text-avito-primary">{mockUser.stats.activeAds}</div>
+                <div className="text-2xl font-bold text-avito-primary">0</div>
                 <div className="text-sm text-neutral-600 dark:text-neutral-400">Активных</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-avito-primary">{mockUser.stats.soldItems}</div>
+                <div className="text-2xl font-bold text-avito-primary">0</div>
                 <div className="text-sm text-neutral-600 dark:text-neutral-400">Продано</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-avito-primary">
-                  {mockUser.stats.totalViews.toLocaleString()}
-                </div>
+                <div className="text-2xl font-bold text-avito-primary">0</div>
                 <div className="text-sm text-neutral-600 dark:text-neutral-400">Просмотров</div>
               </div>
             </div>
@@ -189,6 +234,65 @@ export default function ProfilePage() {
                 </div>
                 <ChevronRight className="w-5 h-5 text-neutral-400 dark:text-neutral-500" />
               </button>
+
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-red-600 dark:text-red-400"
+              >
+                <div className="flex items-center">
+                  <span className="text-red-600 dark:text-red-400">Выйти из аккаунта</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-red-400 dark:text-red-500" />
+              </button>
+            </div>
+          </div>
+
+          {/* User Info Section */}
+          <div className="bg-white dark:bg-neutral-800 rounded-2xl p-4 shadow-sm">
+            <h3 className="font-semibold mb-3 text-neutral-800 dark:text-neutral-200">Информация</h3>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-neutral-600 dark:text-neutral-400">Telegram ID</span>
+                <span className="text-neutral-800 dark:text-neutral-200 font-mono">{userTelegramId}</span>
+              </div>
+              
+              {user.phone && (
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-600 dark:text-neutral-400">Телефон</span>
+                  <span className="text-neutral-800 dark:text-neutral-200">{user.phone}</span>
+                </div>
+              )}
+              
+              {user.email && (
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-600 dark:text-neutral-400">Email</span>
+                  <span className="text-neutral-800 dark:text-neutral-200">{user.email}</span>
+                </div>
+              )}
+              
+              <div className="flex justify-between items-center">
+                <span className="text-neutral-600 dark:text-neutral-400">Дата регистрации</span>
+                <span className="text-neutral-800 dark:text-neutral-200">
+                  {new Date(user.createdAt).toLocaleDateString('ru-RU', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })}
+                </span>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-neutral-600 dark:text-neutral-400">Последняя активность</span>
+                <span className="text-neutral-800 dark:text-neutral-200">
+                  {new Date(user.lastActiveAt).toLocaleDateString('ru-RU', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -203,7 +307,7 @@ export default function ProfilePage() {
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key as any)}
-                  className={`flex-1 py-3 px-4 font-medium transition-colors ${
+                  className={`flex-1 py-3 px-4 text-sm font-medium transition-colors ${
                     activeTab === tab.key
                       ? "text-avito-primary border-b-2 border-avito-primary"
                       : "text-neutral-600 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200"
@@ -217,126 +321,90 @@ export default function ProfilePage() {
             <div className="p-4">
               {activeTab === "ads" && (
                 <div className="text-center py-8">
-                  <Package className="w-12 h-12 text-neutral-400 dark:text-neutral-500 mx-auto mb-3" />
-                  <p className="text-neutral-600 dark:text-neutral-400">Здесь будут отображаться ваши объявления</p>
+                  <Package className="w-12 h-12 text-neutral-400 mx-auto mb-4" />
+                  <p className="text-neutral-600 dark:text-neutral-400">У вас пока нет активных объявлений</p>
+                  <button
+                    onClick={() => router.push("/create")}
+                    className="mt-4 px-6 py-2 bg-avito-primary text-white rounded-xl hover:bg-avito-primary/90 transition-colors"
+                  >
+                    Создать объявление
+                  </button>
                 </div>
               )}
 
               {activeTab === "reviews" && (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((review) => (
-                    <div
-                      key={review}
-                      className="border-b border-neutral-100 dark:border-neutral-700 pb-4 last:border-b-0"
-                    >
-                      <div className="flex items-center space-x-3 mb-2">
-                        <Image
-                          src="/placeholder.svg?height=40&width=40"
-                          alt="Reviewer"
-                          width={40}
-                          height={40}
-                          className="rounded-full"
-                        />
-                        <div>
-                          <div className="font-medium text-neutral-800 dark:text-neutral-200">Мария К.</div>
-                          <div className="flex items-center">
-                            {[1, 2, 3, 4, 5].map((star) => (
-                              <Star key={star} className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      <p className="text-neutral-700 dark:text-neutral-300 text-sm">
-                        Отличный продавец! Товар соответствует описанию, быстрая доставка.
-                      </p>
-                    </div>
-                  ))}
+                <div className="text-center py-8">
+                  <Star className="w-12 h-12 text-neutral-400 mx-auto mb-4" />
+                  <p className="text-neutral-600 dark:text-neutral-400">У вас пока нет отзывов</p>
                 </div>
               )}
 
               {activeTab === "settings" && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="font-semibold text-neutral-800 dark:text-neutral-200">Личные данные</h4>
-                    {!editMode ? (
-                      <button onClick={() => setEditMode(true)} className="text-avito-primary hover:underline">
-                        Редактировать
-                      </button>
-                    ) : (
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => {
-                            setEditMode(false)
-                            setFormData({
-                              name: mockUser.name,
-                              phone: mockUser.phone,
-                              email: mockUser.email,
-                              location: mockUser.location,
-                            })
-                          }}
-                          className="text-neutral-600 dark:text-neutral-400 hover:underline"
-                        >
-                          Отмена
-                        </button>
-                        <button onClick={handleSaveSettings} className="text-avito-primary hover:underline">
-                          Сохранить
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Имя</label>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
+                      Имя
+                    </label>
                     <input
                       type="text"
                       value={formData.name}
                       onChange={(e) => handleInputChange("name", e.target.value)}
-                      readOnly={!editMode}
-                      className={`w-full px-3 py-2 border border-neutral-200 dark:border-neutral-600 rounded-lg focus:ring-2 focus:ring-avito-primary focus:border-transparent outline-none bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 ${!editMode ? "cursor-not-allowed opacity-60" : ""}`}
+                      disabled={!editMode}
+                      className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg focus:ring-2 focus:ring-avito-primary focus:border-transparent outline-none bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 disabled:bg-neutral-100 dark:disabled:bg-neutral-800"
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Телефон</label>
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
+                      Телефон
+                    </label>
                     <input
                       type="tel"
                       value={formData.phone}
                       onChange={(e) => handleInputChange("phone", e.target.value)}
-                      readOnly={!editMode}
-                      className={`w-full px-3 py-2 border border-neutral-200 dark:border-neutral-600 rounded-lg focus:ring-2 focus:ring-avito-primary focus:border-transparent outline-none bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 ${!editMode ? "cursor-not-allowed opacity-60" : ""}`}
+                      disabled={!editMode}
+                      className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg focus:ring-2 focus:ring-avito-primary focus:border-transparent outline-none bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 disabled:bg-neutral-100 dark:disabled:bg-neutral-800"
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Email</label>
+                  <div>
+                    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
+                      Email
+                    </label>
                     <input
                       type="email"
                       value={formData.email}
                       onChange={(e) => handleInputChange("email", e.target.value)}
-                      readOnly={!editMode}
-                      className={`w-full px-3 py-2 border border-neutral-200 dark:border-neutral-600 rounded-lg focus:ring-2 focus:ring-avito-primary focus:border-transparent outline-none bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 ${!editMode ? "cursor-not-allowed opacity-60" : ""}`}
+                      disabled={!editMode}
+                      className="w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-lg focus:ring-2 focus:ring-avito-primary focus:border-transparent outline-none bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 disabled:bg-neutral-100 dark:disabled:bg-neutral-800"
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Город</label>
-                    <input
-                      type="text"
-                      value={formData.location}
-                      onChange={(e) => handleInputChange("location", e.target.value)}
-                      readOnly={!editMode}
-                      className={`w-full px-3 py-2 border border-neutral-200 dark:border-neutral-600 rounded-lg focus:ring-2 focus:ring-avito-primary focus:border-transparent outline-none bg-white dark:bg-neutral-700 text-neutral-800 dark:text-neutral-200 ${!editMode ? "cursor-not-allowed opacity-60" : ""}`}
-                    />
+                  <div className="flex space-x-3 pt-4">
+                    {editMode ? (
+                      <>
+                        <button
+                          onClick={handleSaveSettings}
+                          className="flex-1 px-4 py-2 bg-avito-primary text-white rounded-lg hover:bg-avito-primary/90 transition-colors"
+                        >
+                          Сохранить
+                        </button>
+                        <button
+                          onClick={() => setEditMode(false)}
+                          className="flex-1 px-4 py-2 border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+                        >
+                          Отмена
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => setEditMode(true)}
+                        className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-50 dark:hover:bg-neutral-700 transition-colors"
+                      >
+                        Редактировать
+                      </button>
+                    )}
                   </div>
-
-                  {editMode && (
-                    <button
-                      onClick={handleSaveSettings}
-                      className="w-full bg-avito-primary text-white py-3 rounded-xl font-medium hover:bg-avito-primary/90 transition-colors mt-6"
-                    >
-                      Сохранить изменения
-                    </button>
-                  )}
                 </div>
               )}
             </div>
