@@ -42,6 +42,25 @@ print_status "🚀 Начинаем автоматический деплой...
 CURRENT_COMMIT=$(git rev-parse HEAD)
 print_status "Текущий коммит: $CURRENT_COMMIT"
 
+# Защищаем критические файлы от перезаписи
+print_status "🔒 Защищаем критические файлы..."
+
+# Создаем резервные копии критических файлов
+if [ -f ".env" ]; then
+    cp .env .env.backup
+    print_status "📄 .env файл защищен"
+fi
+
+if [ -f ".env.local" ]; then
+    cp .env.local .env.local.backup
+    print_status "📄 .env.local файл защищен"
+fi
+
+if [ -f ".env.production" ]; then
+    cp .env.production .env.production.backup
+    print_status "📄 .env.production файл защищен"
+fi
+
 # Получаем обновления
 print_status "📦 Получаем обновления из GitHub..."
 if ! git fetch origin main; then
@@ -81,6 +100,22 @@ rollback() {
         mv .next.backup .next
     fi
     
+    # Восстанавливаем защищенные файлы
+    if [ -f ".env.backup" ]; then
+        mv .env.backup .env
+        print_status "🔒 .env файл восстановлен"
+    fi
+    
+    if [ -f ".env.local.backup" ]; then
+        mv .env.local.backup .env.local
+        print_status "🔒 .env.local файл восстановлен"
+    fi
+    
+    if [ -f ".env.production.backup" ]; then
+        mv .env.production.backup .env.production
+        print_status "🔒 .env.production файл восстановлен"
+    fi
+    
     print_error "❌ Деплой отменен, выполнен откат"
     exit 1
 }
@@ -92,22 +127,63 @@ trap rollback ERR
 print_status "📝 Применяем изменения из Git..."
 git reset --hard origin/main
 
+# Восстанавливаем защищенные файлы после git reset
+print_status "🔒 Восстанавливаем защищенные файлы..."
+
+if [ -f ".env.backup" ]; then
+    mv .env.backup .env
+    print_status "📄 .env файл восстановлен"
+fi
+
+if [ -f ".env.local.backup" ]; then
+    mv .env.local.backup .env.local
+    print_status "📄 .env.local файл восстановлен"
+fi
+
+if [ -f ".env.production.backup" ]; then
+    mv .env.production.backup .env.production
+    print_status "📄 .env.production файл восстановлен"
+fi
+
 # Проверяем изменения в package.json
 if ! cmp -s package.json package.json.backup; then
     print_status "📦 Обнаружены изменения в зависимостях, переустанавливаем..."
     
-    # Очищаем node_modules для чистой установки
+    # Сохраняем node_modules если возможно
     if [ -d "node_modules" ]; then
-        rm -rf node_modules
+        print_status "💾 Создаем резервную копию node_modules..."
+        mv node_modules node_modules.backup
     fi
     
     # Устанавливаем зависимости
     if ! npm ci; then
         print_error "Не удалось установить зависимости"
+        
+        # Восстанавливаем node_modules при ошибке
+        if [ -d "node_modules.backup" ]; then
+            print_status "🔄 Восстанавливаем node_modules..."
+            rm -rf node_modules
+            mv node_modules.backup node_modules
+        fi
+        
         rollback
+    else
+        # Удаляем старую резервную копию при успехе
+        if [ -d "node_modules.backup" ]; then
+            rm -rf node_modules.backup
+        fi
     fi
 else
-    print_status "📦 Зависимости не изменились"
+    print_status "📦 Зависимости не изменились, используем существующие"
+    
+    # Проверяем целостность node_modules
+    if [ ! -d "node_modules" ] || [ ! -f "node_modules/.package-lock.json" ]; then
+        print_warning "⚠️ node_modules поврежден, переустанавливаем..."
+        if ! npm ci; then
+            print_error "Не удалось восстановить зависимости"
+            rollback
+        fi
+    fi
 fi
 
 # Собираем приложение
@@ -159,6 +235,12 @@ fi
 print_status "🧹 Очищаем резервные копии..."
 rm -f package.json.backup
 rm -rf .next.backup
+
+# Очищаем резервные копии защищенных файлов (они уже восстановлены)
+rm -f .env.backup 2>/dev/null || true
+rm -f .env.local.backup 2>/dev/null || true  
+rm -f .env.production.backup 2>/dev/null || true
+rm -rf node_modules.backup 2>/dev/null || true
 
 # Получаем информацию о новом коммите
 NEW_COMMIT=$(git rev-parse HEAD)
