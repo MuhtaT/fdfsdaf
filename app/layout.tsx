@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import BottomNavigation from "@/components/navigation/BottomNavigation"
 import { TelegramProvider } from "@/providers/TelegramProvider"
+import { AuthProviderWithPassword } from "@/components/auth/AuthProviderWithPassword"
 import { ThemeInitializer } from "./theme-initializer"
 import { AppInitializer, TelegramUserInfo } from "./app-initializer"
 
@@ -95,13 +96,16 @@ export default function RootLayout({ children }: RootLayoutProps) {
           {/* Инициализатор приложения */}
           <AppInitializer />
           
-          {/* Основной контент */}
-          <main className="min-h-screen pb-safe relative">
-            {children}
-          </main>
-          
-          {/* Нижняя навигация */}
-          <BottomNavigation />
+          {/* Провайдер аутентификации с паролями */}
+          <AuthProviderWithPassword>
+            {/* Основной контент */}
+            <main className="min-h-screen pb-safe relative">
+              {children}
+            </main>
+            
+            {/* Нижняя навигация */}
+            <BottomNavigation />
+          </AuthProviderWithPassword>
           
           {/* Информация о пользователе в dev режиме */}
           {process.env.NODE_ENV === 'development' && <TelegramUserInfo />}

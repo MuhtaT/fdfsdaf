@@ -1,0 +1,189 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Модель пользователя
+model User {
+  id                Int      @id @default(autoincrement())
+  telegramId        String   @unique
+  firstName         String?
+  lastName          String?
+  username          String?
+  photoUrl          String?
+  languageCode      String?
+  isPremium         Boolean  @default(false)
+  allowsWriteToPm   Boolean  @default(false)
+  isBot             Boolean  @default(false)
+  
+  // Дополнительные поля для маркетплейса
+  email             String?
+  phone             String?
+  verified          Boolean  @default(false)
+  rating            Float    @default(0.0)
+  reviewCount       Int      @default(0)
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  lastActiveAt      DateTime @default(now())
+  
+  // Связи
+  products          Product[]
+  orders            Order[]
+  reviews           Review[]
+  favorites         Favorite[]
+  chats             ChatParticipant[]
+  
+  @@map("users")
+}
+
+// Модель продукта/товара
+model Product {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String
+  price       Float
+  currency    String   @default("RUB")
+  condition   String   // new, excellent, good, fair
+  category    String
+  subcategory String?
+  location    String
+  images      String   // JSON array of image URLs
+  isActive    Boolean  @default(true)
+  isPromoted  Boolean  @default(false)
+  viewCount   Int      @default(0)
+  
+  // Связи
+  sellerId    Int
+  seller      User     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  orders      Order[]
+  favorites   Favorite[]
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("products")
+}
+
+// Модель заказа
+model Order {
+  id          Int         @id @default(autoincrement())
+  status      OrderStatus @default(PENDING)
+  totalPrice  Float
+  currency    String      @default("RUB")
+  deliveryAddress String?
+  notes       String?
+  
+  // Связи
+  buyerId     Int
+  buyer       User        @relation(fields: [buyerId], references: [id])
+  productId   Int
+  product     Product     @relation(fields: [productId], references: [id])
+  
+  // Timestamps
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  @@map("orders")
+}
+
+// Статусы заказа
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  COMPLETED
+}
+
+// Модель избранного
+model Favorite {
+  id        Int @id @default(autoincrement())
+  
+  // Связи
+  userId    Int
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  
+  // Уникальная комбинация пользователь-продукт
+  @@unique([userId, productId])
+  @@map("favorites")
+}
+
+// Модель отзывов
+model Review {
+  id        Int    @id @default(autoincrement())
+  rating    Int    // от 1 до 5
+  comment   String?
+  
+  // Связи
+  reviewerId Int
+  reviewer   User @relation(fields: [reviewerId], references: [id])
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  
+  @@map("reviews")
+}
+
+// Модель чата для сообщений между пользователями
+model Chat {
+  id           Int               @id @default(autoincrement())
+  participants ChatParticipant[]
+  messages     Message[]
+  
+  // Timestamps
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  
+  @@map("chats")
+}
+
+// Участники чата
+model ChatParticipant {
+  id     Int @id @default(autoincrement())
+  
+  // Связи
+  chatId Int
+  chat   Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Уникальная комбинация чат-пользователь
+  @@unique([chatId, userId])
+  @@map("chat_participants")
+}
+
+// Модель сообщений
+model Message {
+  id        Int      @id @default(autoincrement())
+  content   String
+  messageType String @default("text") // text, image, file
+  isRead    Boolean  @default(false)
+  
+  // Связи
+  chatId    Int
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId  Int
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  
+  @@map("messages")
+}
