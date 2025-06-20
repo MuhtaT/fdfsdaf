@@ -76,7 +76,13 @@ async function performUpdate() {
     return { success: true, message: 'Обновление применено успешно' }
     
   } catch (error) {
-    console.error('❌ Ошибка при обновлении:', error)
+    console.error('❌ Ошибка при выполнении автообновления:', error)
+    
+    // Логируем детали ошибки
+    if (error instanceof Error) {
+      console.error('Сообщение об ошибке:', error.message)
+      console.error('Stack trace:', error.stack)
+    }
     
     // Восстанавливаем из резервной копии
     try {
@@ -131,17 +137,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ message: 'Деплой пропущен' })
       }
       
-      // Запускаем обновление асинхронно
-      performUpdate().then(result => {
-        console.log('🎯 Результат обновления:', result)
-      }).catch(error => {
-        console.error('💥 Критическая ошибка обновления:', error)
+      // Асинхронно выполняем обновление (не блокируем ответ webhook)
+      performUpdate().catch(error => {
+        console.error('❌ Критическая ошибка автообновления:', error)
       })
       
       return NextResponse.json({ 
+        status: 'processing',
         message: 'Автообновление запущено',
         commit: data.head_commit.id.substring(0, 7),
-        author: data.head_commit.author.name
+        timestamp: new Date().toISOString(),
+        branch: data.ref.replace('refs/heads/', '')
       })
     }
     

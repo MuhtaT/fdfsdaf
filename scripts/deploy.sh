@@ -233,14 +233,14 @@ fi
 
 # Очищаем резервные копии
 print_status "🧹 Очищаем резервные копии..."
-rm -f package.json.backup
-rm -rf .next.backup
+rm -f package.json.backup 2>/dev/null || true
+rm -rf .next.backup 2>/dev/null || true
 
 # Очищаем резервные копии защищенных файлов (они уже восстановлены)
-rm -f .env.backup 2>/dev/null || true
-rm -f .env.local.backup 2>/dev/null || true  
-rm -f .env.production.backup 2>/dev/null || true
-rm -rf node_modules.backup 2>/dev/null || true
+[ -f .env.backup ] && rm -f .env.backup 2>/dev/null || true
+[ -f .env.local.backup ] && rm -f .env.local.backup 2>/dev/null || true  
+[ -f .env.production.backup ] && rm -f .env.production.backup 2>/dev/null || true
+[ -d node_modules.backup ] && rm -rf node_modules.backup 2>/dev/null || true
 
 # Получаем информацию о новом коммите
 NEW_COMMIT=$(git rev-parse HEAD)
